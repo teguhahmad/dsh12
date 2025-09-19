@@ -12,6 +12,7 @@ import {
   Percent
 } from 'lucide-react';
 import { Account, SalesData, IncentiveRule, User, IncentiveCalculation } from '../types';
+import { useSupabase } from '../hooks/useSupabase';
 
 interface IncentiveOverviewProps {
   accounts: Account[];
@@ -26,6 +27,24 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
   incentiveRules,
   currentUser
 }) => {
+  const { fetchUsers } = useSupabase();
+  const [allUsers, setAllUsers] = React.useState<User[]>([]);
+
+  // Load all users for name mapping
+  React.useEffect(() => {
+    const loadUsers = async () => {
+      if (currentUser.role === 'superadmin') {
+        try {
+          const users = await fetchUsers();
+          setAllUsers(users);
+        } catch (error) {
+          console.error('Error loading users:', error);
+        }
+      }
+    };
+    
+    loadUsers();
+  }, [currentUser.role, fetchUsers]);
   const calculateUserIncentive = (
     userId: string, 
     userAccounts: Account[], 
@@ -151,14 +170,13 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
   const getUserName = (userId: string): string => {
     if (userId === currentUser.id) return currentUser.name;
     
-    // Try to find user name from account's user_id
-    const userAccount = accounts.find(acc => acc.user_id === userId);
-    if (userAccount) {
-      // For now, use the account username as a fallback
-      // In a real app, you'd fetch from a users table
-      return userAccount.username || `User ${userId.slice(0, 8)}`;
+    // Find user from allUsers array
+    const user = allUsers.find(u => u.id === userId);
+    if (user) {
+      return user.name;
     }
     
+    // Fallback to user ID if not found
     return `User ${userId.slice(0, 8)}`;
   };
 
@@ -194,7 +212,7 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
     }
 
     return userCalculations.sort((a, b) => b.incentive_amount - a.incentive_amount);
-  }, [accounts, salesData, incentiveRules, currentUser]);
+  }, [accounts, salesData, incentiveRules, currentUser, allUsers]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -402,15 +420,33 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
                             className="bg-blue-600 h-2 rounded-full transition-all duration-300"
                             style={{ width: `${Math.min(calculation.progress_percentage, 100)}%` }}
                           ></div>
+                            {calculation.progress_percentage > 10 && (
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <span className="text-xs font-medium text-white">
+                                  {calculation.progress_percentage.toFixed(1)}%
+                                </span>
+                              </div>
+                            )}
                         </div>
                         
-                        <div className="flex justify-between text-xs text-blue-800">
+                        <div className="grid grid-cols-1 gap-2 text-xs text-blue-800">
+                          <div className="flex justify-between items-center">
+                            <span className="font-medium">Current Revenue:</span>
+                            <span>{formatCurrency(calculation.total_revenue)}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="font-medium">Next Tier Target:</span>
+                            <span>{formatCurrency(calculation.next_tier.revenue_threshold)}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="font-medium">Remaining Needed:</span>
+                            <span className="text-orange-700 font-semibold">{formatCurrency(calculation.remaining_to_next_tier)}</span>
+                          </div>
+                          <div className="flex justify-between items-center pt-1 border-t border-blue-200">
                           <span>
-                            Next: {calculation.next_tier.incentive_rate}% at {formatCurrency(calculation.next_tier.revenue_threshold)}
+                              Next Tier Rate: <span className="font-semibold">{calculation.next_tier.incentive_rate}%</span>
                           </span>
-                          <span>
-                            {formatCurrency(calculation.remaining_to_next_tier)} remaining
-                          </span>
+                          </div>
                         </div>
                       </div>
                     )}
