@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
 import { 
-  Trophy, 
   Target, 
   DollarSign, 
   TrendingUp, 
@@ -9,7 +8,11 @@ import {
   Star,
   BarChart3,
   Calculator,
-  Percent
+  Percent,
+  Filter,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 import { Account, SalesData, IncentiveRule, User, IncentiveCalculation } from '../types';
 import { useSupabase } from '../hooks/useSupabase';
@@ -29,6 +32,9 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
 }) => {
   const { fetchUsers } = useSupabase();
   const [allUsers, setAllUsers] = React.useState<User[]>([]);
+  const [sortBy, setSortBy] = React.useState<'incentive' | 'revenue' | 'commission' | 'rate'>('incentive');
+  const [sortOrder, setSortOrder] = React.useState<'asc' | 'desc'>('desc');
+  const [filterBy, setFilterBy] = React.useState<'all' | 'earning' | 'not_earning'>('all');
 
   // Load all users for name mapping
   React.useEffect(() => {
@@ -214,6 +220,49 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
     return userCalculations.sort((a, b) => b.incentive_amount - a.incentive_amount);
   }, [accounts, salesData, incentiveRules, currentUser, allUsers]);
 
+  // Filter and sort calculations
+  const filteredAndSortedCalculations = useMemo(() => {
+    let filtered = [...incentiveCalculations];
+    
+    // Apply filter
+    if (filterBy === 'earning') {
+      filtered = filtered.filter(calc => calc.incentive_amount > 0);
+    } else if (filterBy === 'not_earning') {
+      filtered = filtered.filter(calc => calc.incentive_amount === 0);
+    }
+    
+    // Apply sort
+    filtered.sort((a, b) => {
+      let aValue: number, bValue: number;
+      
+      switch (sortBy) {
+        case 'incentive':
+          aValue = a.incentive_amount;
+          bValue = b.incentive_amount;
+          break;
+        case 'revenue':
+          aValue = a.total_revenue;
+          bValue = b.total_revenue;
+          break;
+        case 'commission':
+          aValue = a.total_commission;
+          bValue = b.total_commission;
+          break;
+        case 'rate':
+          aValue = a.commission_rate;
+          bValue = b.commission_rate;
+          break;
+        default:
+          aValue = a.incentive_amount;
+          bValue = b.incentive_amount;
+      }
+      
+      return sortOrder === 'desc' ? bValue - aValue : aValue - bValue;
+    });
+    
+    return filtered;
+  }, [incentiveCalculations, filterBy, sortBy, sortOrder]);
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
       style: 'currency',
@@ -223,6 +272,11 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
   };
 
   const totalIncentives = incentiveCalculations.reduce((sum, calc) => sum + calc.incentive_amount, 0);
+  const totalRevenue = incentiveCalculations.reduce((sum, calc) => sum + calc.total_revenue, 0);
+  const totalCommission = incentiveCalculations.reduce((sum, calc) => sum + calc.total_commission, 0);
+  const usersEarningIncentives = incentiveCalculations.filter(calc => calc.incentive_amount > 0).length;
+  const totalIncentivesToPay = totalIncentives; // Same as totalIncentives but with different semantic meaning
+  
   const activeRules = incentiveRules.filter(rule => rule.is_active);
   const primaryActiveRule = activeRules[0]; // Show the first active rule in the header
 
@@ -237,12 +291,6 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
               ? 'Monitor incentive performance across all team members'
               : 'Track your incentive progress and earnings'}
           </p>
-        </div>
-        <div className="flex items-center space-x-2 bg-purple-100 text-purple-800 px-4 py-2 rounded-lg">
-          <Trophy className="w-5 h-5" />
-          <span className="font-medium">
-            {primaryActiveRule ? primaryActiveRule.name : 'No Active Rules'}
-          </span>
         </div>
       </div>
 
@@ -266,42 +314,42 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="bg-white rounded-xl border border-gray-100 p-6">
               <div className="flex items-center space-x-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-cyan-100 rounded-lg flex items-center justify-center">
+                  <TrendingUp className="w-6 h-6 text-blue-600" />
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {formatCurrency(totalRevenue)}
+                  </div>
+                  <p className="text-sm text-gray-600">Total Omset</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-100 p-6">
+              <div className="flex items-center space-x-3">
                 <div className="w-12 h-12 bg-gradient-to-br from-green-100 to-emerald-100 rounded-lg flex items-center justify-center">
                   <DollarSign className="w-6 h-6 text-green-600" />
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-gray-900">
-                    {formatCurrency(totalIncentives)}
+                    {formatCurrency(totalCommission)}
                   </div>
-                  <p className="text-sm text-gray-600">Total Incentives</p>
+                  <p className="text-sm text-gray-600">Total Komisi</p>
                 </div>
               </div>
             </div>
 
             <div className="bg-white rounded-xl border border-gray-100 p-6">
               <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-cyan-100 rounded-lg flex items-center justify-center">
-                  <Users className="w-6 h-6 text-blue-600" />
+                <div className="w-12 h-12 bg-gradient-to-br from-purple-100 to-blue-100 rounded-lg flex items-center justify-center">
+                  <Users className="w-6 h-6 text-purple-600" />
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-gray-900">
-                    {incentiveCalculations.filter(calc => calc.incentive_amount > 0).length}
+                    {usersEarningIncentives}
                   </div>
-                  <p className="text-sm text-gray-600">Earning Incentives</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-100 p-6">
-              <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-purple-100 to-pink-100 rounded-lg flex items-center justify-center">
-                  <Target className="w-6 h-6 text-purple-600" />
-                </div>
-                <div>
-                  <div className="text-2xl font-bold text-gray-900">
-                    {formatCurrency(primaryActiveRule.base_revenue_threshold)}
-                  </div>
-                  <p className="text-sm text-gray-600">Base Threshold</p>
+                  <p className="text-sm text-gray-600">User Berhak Komisi</p>
                 </div>
               </div>
             </div>
@@ -309,29 +357,83 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
             <div className="bg-white rounded-xl border border-gray-100 p-6">
               <div className="flex items-center space-x-3">
                 <div className="w-12 h-12 bg-gradient-to-br from-orange-100 to-red-100 rounded-lg flex items-center justify-center">
-                  <Percent className="w-6 h-6 text-orange-600" />
+                  <Award className="w-6 h-6 text-orange-600" />
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-gray-900">
-                    {primaryActiveRule.commission_rate_min}% - {primaryActiveRule.commission_rate_max === 100 ? '∞' : `${primaryActiveRule.commission_rate_max}%`}
+                    {formatCurrency(totalIncentivesToPay)}
                   </div>
-                  <p className="text-sm text-gray-600">Commission Range</p>
+                  <p className="text-sm text-gray-600">Komisi Dibayarkan</p>
                 </div>
               </div>
             </div>
           </div>
 
+          {/* Filters and Sort */}
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2">
+                  <Filter className="w-5 h-5 text-gray-400" />
+                  <span className="text-sm font-medium text-gray-700">Filter:</span>
+                  <select
+                    value={filterBy}
+                    onChange={(e) => setFilterBy(e.target.value as 'all' | 'earning' | 'not_earning')}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                  >
+                    <option value="all">Semua User</option>
+                    <option value="earning">Mendapat Komisi</option>
+                    <option value="not_earning">Tidak Mendapat Komisi</option>
+                  </select>
+                </div>
+              </div>
+              
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2">
+                  <ArrowUpDown className="w-5 h-5 text-gray-400" />
+                  <span className="text-sm font-medium text-gray-700">Urutkan:</span>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as 'incentive' | 'revenue' | 'commission' | 'rate')}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                  >
+                    <option value="incentive">Komisi Tertinggi</option>
+                    <option value="revenue">Omset Tertinggi</option>
+                    <option value="commission">Total Komisi</option>
+                    <option value="rate">Persentase Komisi</option>
+                  </select>
+                </div>
+                
+                <button
+                  onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
+                  className="flex items-center space-x-1 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm"
+                >
+                  {sortOrder === 'desc' ? (
+                    <ArrowDown className="w-4 h-4" />
+                  ) : (
+                    <ArrowUp className="w-4 h-4" />
+                  )}
+                  <span>{sortOrder === 'desc' ? 'Tertinggi' : 'Terendah'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
           {/* Incentive Calculations */}
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <div className="p-6 border-b border-gray-100">
-              <h3 className="text-lg font-semibold text-gray-900">
-                {currentUser.role === 'superadmin' ? 'Team Performance' : 'Your Performance'}
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {currentUser.role === 'superadmin' ? 'Team Performance' : 'Your Performance'}
+                </h3>
+                <span className="text-sm text-gray-600">
+                  Menampilkan {filteredAndSortedCalculations.length} dari {incentiveCalculations.length} user
+                </span>
+              </div>
             </div>
 
-            {incentiveCalculations.length > 0 ? (
+            {filteredAndSortedCalculations.length > 0 ? (
               <div className="divide-y divide-gray-100">
-                {incentiveCalculations.map((calculation) => (
+                {filteredAndSortedCalculations.map((calculation) => (
                   <div key={calculation.user_id} className="p-6">
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center space-x-4">
@@ -467,11 +569,15 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
             ) : (
               <div className="text-center py-12">
                 <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No Performance Data</h3>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  {incentiveCalculations.length === 0 ? 'No Performance Data' : 'Tidak Ada Data Sesuai Filter'}
+                </h3>
                 <p className="text-gray-600">
-                  {currentUser.role === 'superadmin' 
-                    ? 'No users have qualifying accounts or sales data yet.'
-                    : 'You don\'t have any qualifying accounts or sales data yet.'}
+                  {incentiveCalculations.length === 0 
+                    ? (currentUser.role === 'superadmin' 
+                        ? 'No users have qualifying accounts or sales data yet.'
+                        : 'You don\'t have any qualifying accounts or sales data yet.')
+                    : 'Coba ubah filter atau kriteria pencarian Anda.'}
                 </p>
               </div>
             )}
