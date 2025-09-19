@@ -19,7 +19,7 @@ import {
   AlertCircle,
   CheckCircle
 } from 'lucide-react';
-import { User as UserType, Account } from '../types';
+import { User as UserType, Account, Category } from '../types';
 import { useSupabase } from '../hooks/useSupabase';
 import { supabase } from '../lib/supabase';
 
@@ -39,6 +39,8 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ accounts, categories, c
   const [accountSearchTerm, setAccountSearchTerm] = useState('');
   const [isCreatingUser, setIsCreatingUser] = useState(false);
   const [signupResult, setSignupResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -48,8 +50,6 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ accounts, categories, c
   });
 
   const {
-    loading,
-    error,
     fetchUsers,
     addUser,
     updateUser,
@@ -59,11 +59,22 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ accounts, categories, c
   // Load users from Supabase
   useEffect(() => {
     const loadUsers = async () => {
+      if (currentUser.role !== 'superadmin') {
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(true);
+      setLoadError(null);
+      
       try {
         const usersData = await fetchUsers();
         setUsers(usersData);
       } catch (err) {
         console.error('Error loading users:', err);
+        setLoadError(err instanceof Error ? err.message : 'Failed to load users');
+      } finally {
+        setIsLoading(false);
       }
     };
 
@@ -78,6 +89,88 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ accounts, categories, c
           <Shield className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">Access Denied</h3>
           <p className="text-gray-600">You don't have permission to access this page.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Team Management</h1>
+            <p className="text-gray-600">Manage user accounts and permissions</p>
+          </div>
+        </div>
+
+        {/* Loading skeleton */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="bg-white rounded-xl border border-gray-100 p-6">
+              <div className="animate-pulse">
+                <div className="flex items-center space-x-3">
+                  <div className="w-12 h-12 bg-gray-200 rounded-lg"></div>
+                  <div className="flex-1">
+                    <div className="h-6 bg-gray-200 rounded mb-2"></div>
+                    <div className="h-4 bg-gray-200 rounded w-2/3"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-100 p-6">
+          <div className="animate-pulse">
+            <div className="h-6 bg-gray-200 rounded mb-4 w-1/4"></div>
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="flex items-center space-x-4">
+                  <div className="w-12 h-12 bg-gray-200 rounded-lg"></div>
+                  <div className="flex-1">
+                    <div className="h-4 bg-gray-200 rounded mb-2"></div>
+                    <div className="h-3 bg-gray-200 rounded w-2/3"></div>
+                  </div>
+                  <div className="flex space-x-2">
+                    <div className="w-8 h-8 bg-gray-200 rounded"></div>
+                    <div className="w-8 h-8 bg-gray-200 rounded"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (loadError) {
+    return (
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Team Management</h1>
+            <p className="text-gray-600">Manage user accounts and permissions</p>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <AlertCircle className="w-16 h-16 text-red-300 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Error Loading Users</h3>
+            <p className="text-gray-600 mb-4">{loadError}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -114,7 +207,7 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ accounts, categories, c
     try {
       if (editingUser) {
         // For updates, ensure we have proper permissions and send all necessary fields
-        const updateData: Partial<User> = {
+        const updateData: Partial<UserType> = {
           name: formData.name,
           role: formData.role,
           managed_accounts: formData.managed_accounts,
@@ -303,37 +396,6 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ accounts, categories, c
       }),
     };
   };
-
-  // Show loading state
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading users...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Show error state
-  if (error) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <Shield className="w-16 h-16 text-red-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Error Loading Users</h3>
-          <p className="text-gray-600 mb-4">{error}</p>
-          <button
-            onClick={() => window.location.reload()}
-            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <>
