@@ -26,47 +26,17 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
   incentiveRules,
   currentUser
 }) => {
-  // Calculate incentives for all users
-  const incentiveCalculations = useMemo(() => {
-    const activeRule = incentiveRules.find(rule => rule.is_active);
-    if (!activeRule) return [];
-
-    // Get all users who manage accounts
-    const userCalculations: IncentiveCalculation[] = [];
-    
-    // For superadmin view, calculate for all users
-    if (currentUser.role === 'superadmin') {
-      // Get unique user IDs from accounts
-      const userIds = [...new Set(accounts.map(acc => acc.user_id).filter(Boolean))];
-      
-      userIds.forEach(userId => {
-        const userAccounts = accounts.filter(acc => acc.user_id === userId);
-        const calculation = calculateUserIncentive(userId, userAccounts, salesData, activeRule);
-        if (calculation) {
-          userCalculations.push(calculation);
-        }
-      });
-    } else {
-      // For regular users, only show their own calculation
-      const userAccounts = accounts.filter(acc => 
-        currentUser.managed_accounts.includes(acc.id)
-      );
-      const calculation = calculateUserIncentive(currentUser.id, userAccounts, salesData, activeRule);
-      if (calculation) {
-        userCalculations.push(calculation);
-      }
-    }
-
-    return userCalculations.sort((a, b) => b.incentive_amount - a.incentive_amount);
-  }, [accounts, salesData, incentiveRules, currentUser]);
-
   const calculateUserIncentive = (
     userId: string, 
     userAccounts: Account[], 
     allSalesData: SalesData[], 
-    rule: IncentiveRule
+    rules: IncentiveRule[]
   ): IncentiveCalculation | null => {
     if (userAccounts.length === 0) return null;
+
+    // Find the best matching rule for this user
+    const applicableRules = rules.filter(rule => rule.is_active);
+    if (applicableRules.length === 0) return null;
 
     // Get sales data for user's accounts
     const userSalesData = allSalesData.filter(data => 
@@ -76,35 +46,27 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
     // Calculate totals
     const totalRevenue = userSalesData.reduce((sum, data) => sum + data.total_purchases, 0);
     const totalCommission = userSalesData.reduce((sum, data) => sum + data.gross_commission, 0);
-    
-    // Filter accounts that meet minimum commission threshold
-    const qualifyingAccountIds = new Set<string>();
-    userAccounts.forEach(account => {
-      const accountSalesData = userSalesData.filter(data => data.account_id === account.id);
-      const accountCommission = accountSalesData.reduce((sum, data) => sum + data.gross_commission, 0);
-      
-      if (accountCommission >= rule.min_commission_threshold) {
-        qualifyingAccountIds.add(account.id);
-      }
-    });
-
-    // Calculate revenue from qualifying accounts only
-    const qualifyingRevenue = userSalesData
-      .filter(data => qualifyingAccountIds.has(data.account_id))
-      .reduce((sum, data) => sum + data.total_purchases, 0);
-
-    // Calculate commission rate
     const commissionRate = totalRevenue > 0 ? (totalCommission / totalRevenue) * 100 : 0;
     
-    // Check if commission rate is within rule range
-    if (commissionRate < rule.commission_rate_min || commissionRate > rule.commission_rate_max) {
+    // Find the best matching rule based on commission rate
+    let bestRule: IncentiveRule | null = null;
+    for (const rule of applicableRules) {
+      if (commissionRate >= rule.commission_rate_min && 
+          (rule.commission_rate_max === 100 || commissionRate <= rule.commission_rate_max)) {
+        bestRule = rule;
+        break;
+      }
+    }
+
+    if (!bestRule) {
+      // Return calculation with no applicable rule
       return {
         user_id: userId,
         user_name: getUserName(userId),
         total_revenue: totalRevenue,
         total_commission: totalCommission,
         commission_rate: commissionRate,
-        applicable_rule: rule,
+        applicable_rule: null,
         current_tier: null,
         next_tier: null,
         incentive_amount: 0,
@@ -114,12 +76,28 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
       };
     }
 
+    // Filter accounts that meet minimum commission threshold for the selected rule
+    const qualifyingAccountIds = new Set<string>();
+    userAccounts.forEach(account => {
+      const accountSalesData = userSalesData.filter(data => data.account_id === account.id);
+      const accountCommission = accountSalesData.reduce((sum, data) => sum + data.gross_commission, 0);
+      
+      if (accountCommission >= bestRule.min_commission_threshold) {
+        qualifyingAccountIds.add(account.id);
+      }
+    });
+
+    // Calculate revenue from qualifying accounts only
+    const qualifyingRevenue = userSalesData
+      .filter(data => qualifyingAccountIds.has(data.account_id))
+      .reduce((sum, data) => sum + data.total_purchases, 0);
+
     // Find current tier and calculate incentive
     let incentiveAmount = 0;
     let currentTier = null;
     let nextTier = null;
 
-    const sortedTiers = [...rule.tiers].sort((a, b) => a.revenue_threshold - b.revenue_threshold);
+    const sortedTiers = [...bestRule.tiers].sort((a, b) => a.revenue_threshold - b.revenue_threshold);
     
     for (let i = 0; i < sortedTiers.length; i++) {
       const tier = sortedTiers[i];
@@ -143,7 +121,7 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
     let remainingToNextTier = 0;
 
     if (nextTier) {
-      const currentThreshold = currentTier?.revenue_threshold || rule.base_revenue_threshold;
+      const currentThreshold = currentTier?.revenue_threshold || bestRule.base_revenue_threshold;
       const nextThreshold = nextTier.revenue_threshold;
       const progress = qualifyingRevenue - currentThreshold;
       const totalNeeded = nextThreshold - currentThreshold;
@@ -160,7 +138,7 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
       total_revenue: totalRevenue,
       total_commission: totalCommission,
       commission_rate: commissionRate,
-      applicable_rule: rule,
+      applicable_rule: bestRule,
       current_tier: currentTier,
       next_tier: nextTier,
       incentive_amount: incentiveAmount,
@@ -172,9 +150,51 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
 
   const getUserName = (userId: string): string => {
     if (userId === currentUser.id) return currentUser.name;
-    // In a real app, you'd have a users lookup
+    
+    // Try to find user name from account's user_id
+    const userAccount = accounts.find(acc => acc.user_id === userId);
+    if (userAccount) {
+      // For now, use the account username as a fallback
+      // In a real app, you'd fetch from a users table
+      return userAccount.username || `User ${userId.slice(0, 8)}`;
+    }
+    
     return `User ${userId.slice(0, 8)}`;
   };
+
+  // Calculate incentives for all users
+  const incentiveCalculations = useMemo(() => {
+    const activeRules = incentiveRules.filter(rule => rule.is_active);
+    if (activeRules.length === 0) return [];
+
+    // Get all users who manage accounts
+    const userCalculations: IncentiveCalculation[] = [];
+    
+    // For superadmin view, calculate for all users
+    if (currentUser.role === 'superadmin') {
+      // Get unique user IDs from accounts
+      const userIds = [...new Set(accounts.map(acc => acc.user_id).filter(Boolean))];
+      
+      userIds.forEach(userId => {
+        const userAccounts = accounts.filter(acc => acc.user_id === userId);
+        const calculation = calculateUserIncentive(userId, userAccounts, salesData, activeRules);
+        if (calculation) {
+          userCalculations.push(calculation);
+        }
+      });
+    } else {
+      // For regular users, only show their own calculation
+      const userAccounts = accounts.filter(acc => 
+        currentUser.managed_accounts.includes(acc.id)
+      );
+      const calculation = calculateUserIncentive(currentUser.id, userAccounts, salesData, activeRules);
+      if (calculation) {
+        userCalculations.push(calculation);
+      }
+    }
+
+    return userCalculations.sort((a, b) => b.incentive_amount - a.incentive_amount);
+  }, [accounts, salesData, incentiveRules, currentUser]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -185,7 +205,8 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
   };
 
   const totalIncentives = incentiveCalculations.reduce((sum, calc) => sum + calc.incentive_amount, 0);
-  const activeRule = incentiveRules.find(rule => rule.is_active);
+  const activeRules = incentiveRules.filter(rule => rule.is_active);
+  const primaryActiveRule = activeRules[0]; // Show the first active rule in the header
 
   return (
     <div className="space-y-6">
@@ -202,21 +223,21 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
         <div className="flex items-center space-x-2 bg-purple-100 text-purple-800 px-4 py-2 rounded-lg">
           <Trophy className="w-5 h-5" />
           <span className="font-medium">
-            {activeRule ? activeRule.name : 'No Active Rule'}
+            {primaryActiveRule ? primaryActiveRule.name : 'No Active Rules'}
           </span>
         </div>
       </div>
 
-      {!activeRule ? (
+      {activeRules.length === 0 ? (
         <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
           <div className="flex items-center space-x-3">
             <Target className="w-6 h-6 text-yellow-600" />
             <div>
-              <h3 className="text-lg font-semibold text-yellow-900">No Active Incentive Rule</h3>
+              <h3 className="text-lg font-semibold text-yellow-900">No Active Incentive Rules</h3>
               <p className="text-yellow-800">
                 {currentUser.role === 'superadmin' 
-                  ? 'Please activate an incentive rule to start calculating incentives.'
-                  : 'Contact your administrator to activate an incentive rule.'}
+                  ? 'Please activate incentive rules to start calculating incentives.'
+                  : 'Contact your administrator to activate incentive rules.'}
               </p>
             </div>
           </div>
@@ -260,7 +281,7 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-gray-900">
-                    {formatCurrency(activeRule.base_revenue_threshold)}
+                    {formatCurrency(primaryActiveRule.base_revenue_threshold)}
                   </div>
                   <p className="text-sm text-gray-600">Base Threshold</p>
                 </div>
@@ -274,7 +295,7 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-gray-900">
-                    {activeRule.commission_rate_min}% - {activeRule.commission_rate_max === 100 ? '∞' : `${activeRule.commission_rate_max}%`}
+                    {primaryActiveRule.commission_rate_min}% - {primaryActiveRule.commission_rate_max === 100 ? '∞' : `${primaryActiveRule.commission_rate_max}%`}
                   </div>
                   <p className="text-sm text-gray-600">Commission Range</p>
                 </div>
@@ -308,6 +329,11 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
                           <p className="text-sm text-gray-600">
                             {calculation.managed_accounts_count} accounts managed
                           </p>
+                          {calculation.applicable_rule && (
+                            <p className="text-xs text-purple-600 font-medium">
+                              Rule: {calculation.applicable_rule.name}
+                            </p>
+                          )}
                         </div>
                       </div>
                       
@@ -389,13 +415,12 @@ const IncentiveOverview: React.FC<IncentiveOverviewProps> = ({
                       </div>
                     )}
 
-                    {calculation.commission_rate < activeRule.commission_rate_min || 
-                     calculation.commission_rate > activeRule.commission_rate_max ? (
+                    {!calculation.applicable_rule ? (
                       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-4">
                         <div className="flex items-center space-x-2">
                           <Target className="w-4 h-4 text-yellow-600" />
                           <span className="text-sm font-medium text-yellow-900">
-                            Commission rate outside eligible range ({activeRule.commission_rate_min}% - {activeRule.commission_rate_max}%)
+                            No applicable incentive rule found for this commission rate ({calculation.commission_rate.toFixed(2)}%)
                           </span>
                         </div>
                       </div>
